@@ -6,6 +6,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.data import Data, Batch
+from torch_geometric.nn import TransformerConv
 import itertools
 import gym
 from gym import spaces
@@ -30,18 +31,9 @@ print(f"Python interpreter used: {sys.executable}")
 
 import os
 
-# Define the directory to save models
 model_save_dir = "Add the path to directory here"
-
-# Need to make changes in Graph structure. 
-# Hereby, I am implementing it using the TGAT based TGN. 
-# Create the directory if it doesn't exist
 if not os.path.exists(model_save_dir):
     os.makedirs(model_save_dir)
-
-import torch
-import torch.nn as nn
-from torch_geometric.nn import TransformerConv
 
 # Define the environment
 class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in which the agent interacts
@@ -358,9 +350,6 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
 
                 for i, a in enumerate(progress_elements):
                     if a == 1 and self.node_features[i, 5] == min_remaining_time: # The inprogress element which has the remaining time equal to the minimum remaining time
-                        # print("completed")
-                        # (i)
-                        # Complete the element
                         self.completed_elements[i] = 1
                         self.node_features[i, 0] = 1
                         # Remove it from the in_progress elements
@@ -386,7 +375,6 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
                         self.crane_assigned = self.crane_assigned + self.node_features[i][2]
 
             else: # So the case when the activity is not finishing in the same day.
-                # previous_day = self.current_day
                 remaining_time = min_remaining_time 
             
                 while (remaining_time!=0):
@@ -461,18 +449,7 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
                         current_weather_factor = new_weather_factor # This will be the weather factor for the present day.
                     
     def step(self, action, timestep):
-        """
-        Processes the agent's action, updates the environment's state, and returns the next observation, reward, and done flag.
-
-        Args:
-            action (array or tensor): The action taken by the agent.
-
-        Returns:
-            next_state (dict): The next observation.
-            reward (float): The reward obtained from the action.
-            done (bool): Whether the episode has ended.
-            info (dict): Additional information.
-        """
+        
         prev_labor_assigned = self.labor_available
         prev_crane_assigned = self.crane_available
         self.cost = 0
@@ -532,13 +509,9 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
                 self.update_materials(action)
 
         reward, constraint_violations, cost = self.calculate_reward(action, self.current_time-prev_time)
-
-        # Now you need to find the elements which are going to finish next
-        # find_next_finishing_element()
         
         return self.get_state(), reward, done, self.current_time, constraint_violations, cost
 
-    ######You may need to update it based on the action actually taken.
     def update_materials(self, action):
         delivered_elements = []
         for day in range(1, self.current_day + 1):
@@ -579,7 +552,6 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
         
         return weather
 
-    # Need to improve this. For now its just simple assumption.
     def apply_weather_effects(self, weather, duration, activity_type): 
         sampled_weather = weather 
         temp, wind, rain = sampled_weather['temp'], sampled_weather['wind'], sampled_weather['rain']
@@ -595,8 +567,7 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
 
         # Adjust remaining time based on weather factor
         return duration/weather_factor # So basically you need to increase the remaining duration based on the weather condition.
-    
-    # Need to improve this. 
+     
     def get_weather_effect_factor(self, weather, duration, activity_type):
         sampled_weather = weather 
         temp, wind, rain = sampled_weather[2].item(), sampled_weather[1].item(), sampled_weather[0].item()
@@ -656,7 +627,7 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
                     invalid_actions.add(j)
                     break
 
-        # Third, you need to check the structural support relationships.
+        # Third, check the structural support relationships.
         for j, action in enumerate(all_possible_actions):
             if j in invalid_actions:
                 continue
@@ -712,7 +683,7 @@ class PrecastSchedulingEnv(gym.Env): #This class is modeling the environment in 
         action_starting_reward = 0
         for i, a in enumerate(action):
             if a == 1:  # If element is selected for assembly
-                action_starting_reward = action_starting_reward + 1000 # This should be fine because you are looking at the starting of the elements, which can come directly from the action you took. 
+                action_starting_reward = action_starting_reward + 1000 
 
         # Need to add a large positive reward if all the activities are completed. 
         all_completed_reward = 0
@@ -905,12 +876,10 @@ class TemporalGraphNetwork(nn.Module):
         )
 
     def initialize_memory(self, num_nodes):
-        """ Initialize memory for all nodes. """
         self.memory = torch.zeros(num_nodes, self.memory_dim, device = 'cuda')
 
 
     def update_memory(self, src, dst, timestamps, new_node_embeddings):
-        """ Update memory for nodes after processing a timestep using GRU. """
         # Update source nodes
         src_memory = self.memory[src]
         src_new_embeddings = new_node_embeddings[src]
@@ -922,15 +891,7 @@ class TemporalGraphNetwork(nn.Module):
         self.memory[dst] = self.memory_updater(dst_new_embeddings, dst_memory)
 
     def forward(self, node_features, edge_index, timestamps):
-        """
-        Args:
-            node_features: Tensor of shape [num_nodes, node_feat_dim]
-            edge_index: Tensor of shape [2, num_edges] representing the graph connectivity
-            timestamps: Tensor of shape [num_nodes, 1] representing the time encoding for each node
-
-        Returns:
-            Tensor of shape [num_nodes, embedding_dim] representing the node embeddings
-        """
+        
         # Encode timestamps
         time_features = self.time_encoder(timestamps)
 
@@ -1037,14 +998,6 @@ class ActorCritic(nn.Module):
         
 
     def forward(self, data, timestep, mem_state, is_training):
-        """
-        Forward pass of the actor critic network.
-        Args: observation (dict): Observation from the environment.
-        
-        Returns: action_probs: Probabilities of each action.
-        state_value : Estimated value of the current state.clear
-        
-        """
 
         # Extract node features and edge_index
         node_features = data.x                  # [total_nodes_in_batch, node_feature_dim]
@@ -1109,10 +1062,6 @@ class ActorCritic(nn.Module):
         return action_probs, state_value, graph_memory_state
     
     def adjacency_to_edge_index(self, edge_adjacency_matrix):
-        "To convert the adjacency matrix of the edges to the edge representation needed for the GCN."
-
-        # You need to get the indices where adjacency_matrix is 1
-        # Returns: edge_index: Edge indices [2, num_edges]
         if edge_adjacency_matrix.dim() != 2:
             raise ValueError(f"Expected a 2D adjacency matrix, but got {edge_adjacency_matrix.dim()}D.")
 
@@ -1132,12 +1081,6 @@ class Agent:
                  minibatch_size,
                  batch_size,
                  device = None):
-        """
-        Initializing the Agent with the ActorCritic model and optimizer.
-        
-        actor_critic_model (nn.Module) : The ActorCritic model.
-        device : Device to run the model on
-        entropy_coef : Coefficient for entropy regularization"""
 
         # Automatically select device if not provided
         
@@ -1217,9 +1160,6 @@ class Agent:
 
 
     def adjacency_to_edge_index(self, edge_adjacency_matrix):
-        "To convert the adjacency matrix of the edges to the edge representation needed for the GCN."
-
-        # Returns: edge_index: Edge indices [2, num_edges]
         if edge_adjacency_matrix.dim() != 2:
             raise ValueError(f"Expected a 2D adjacency matrix, but got {edge_adjacency_matrix.dim()}D.")
 
@@ -1227,12 +1167,6 @@ class Agent:
         return edge_index
 
     def select_action(self, observation, timestep):
-        """
-        Selects an action based on the current observation. 
-        
-        observation (dict) : Current state observation from the environment.
-        
-        Returns : action (numpy.ndarray) - Selected action. """
         self.model.eval()
         # selected_actions = torch.zeros(n_elements, dtype=torch.float32).to(self.device)
 
@@ -1270,30 +1204,12 @@ class Agent:
         return selected_action 
     
     def store_transition(self, reward, done):
-        # As the agent interacts with the environment, at each time step, it stores the rewards received, and whether that particular state was terminal state or not. 
-        """
-        Stores the reward and done flag for the current timestep.
         
-        Args:
-            reward (float): Reward received after taking the action.
-            done (bool): Flag indicating if the episode has ended.
-        """
         self.rewards.append(torch.tensor([reward], dtype=torch.float32).to(self.device))
         self.dones.append(torch.tensor([done], dtype=torch.float32).to(self.device))
 
     def compute_returns_and_advantages(self, last_value, first_state_index, last_state_index, done):
 
-        """
-        Computes discounted returns and advantages.
-
-        Args:
-            last_value (torch.Tensor): The value of the last state.
-            done (bool): Flag indicating if the episode has ended.
-
-        Returns:
-            returns (torch.Tensor): Tensor of discounted returns.
-            advantages (torch.Tensor): Tensor of advantages.
-        """
         rewards = self.rewards[first_state_index:last_state_index + 1]
         dones = self.dones[first_state_index:last_state_index + 1]
         # values = self.values[first_state_index:last_state_index] + [last_value.view(1,1)]
@@ -1314,13 +1230,11 @@ class Agent:
         # Reverse the lists to maintain the original order
         returns = torch.cat(returns[::-1]).detach().view(-1, 1)
         advantages = torch.cat(advantages[::-1]).detach().view(-1, 1)
-        # advantages = (advantages - advantages.mean())/(advantages.std() + 1e-8)
+        
     
         return returns, advantages
     
     def update(self):
-        "Updating the policy and value network based on collected experiences"
-        "Use the PPO clipped surrogate objectives with minibatch updates"
 
         # Set the model to training mode
         self.model.train()
@@ -1456,10 +1370,7 @@ class Agent:
         self.reset_memory()
 
 def getActionSpaceLength(n_elements, crane_capacity):
-    """
-    Generate all valid actions where the nmber of selected elements is less than crane_capacity
-    
-    Returns : list of binary arrays representing valid actions"""
+
     valid_actions = []
     for k in range(0, crane_capacity + 1):
         for subset in itertools.combinations(range(n_elements), k):
@@ -1472,7 +1383,6 @@ def plot_rewards_rewards(episode_rewards, num_episodes, save_path, computed_dura
     plt.figure(figsize=(24,12))
     episodes = np.arange(1, num_episodes+1)
 
-    # First axis for episode rewards
     ax1 = plt.gca()
     line1 = ax1.plot(episodes, episode_rewards, label = 'Episode Reward', color = 'blue', zorder = 1)
     ax1.set_xlabel ('Episode')
@@ -1497,8 +1407,7 @@ def plot_rewards_rewards(episode_rewards, num_episodes, save_path, computed_dura
 def plot_rewards_durations(episode_rewards, num_episodes, save_path, computed_duration, average_reward, average_durations):
     plt.figure(figsize=(24,12))
     episodes = np.arange(1, num_episodes+1)
-
-    # Second axis for computed durations
+    
     ax1 = plt.gca()
     line2 = ax1.plot(episodes, computed_duration, label='Computed Duration', color='red', zorder = 1)
     ax1.set_ylabel('Computed Duration', color='red')
@@ -1522,8 +1431,6 @@ def plot_rewards_durations(episode_rewards, num_episodes, save_path, computed_du
 def plot_rewards_violations(episode_rewards, num_episodes, save_path, episode_constraint_violations, average_reward, avg_constraint_violations):
     plt.figure(figsize=(24,12))
     episodes = np.arange(1, num_episodes+1)
-
-    # Second axis for computed durations
     ax1 = plt.gca()
     line2 = ax1.plot(episodes, episode_constraint_violations, label='Computed Duration', color='red', zorder = 1)
     ax1.set_ylabel('Computed Violations', color='red')
@@ -1548,7 +1455,6 @@ def plot_rewards_cost(episode_rewards, num_episodes, save_path_cost, episode_cos
     plt.figure(figsize=(24,12))
     episodes = np.arange(1, num_episodes+1)
 
-    # Second axis for computed durations
     ax1 = plt.gca()
     line2 = ax1.plot(episodes, episode_cost, label='Computed Cost', color='red', zorder = 1)
     ax1.set_ylabel('Computed Cost', color='red')
@@ -1636,7 +1542,7 @@ def main():
                 13: {'rain': [(0, 0.1), (10, 0.7), (50, 0.2)],'wind': [(9.8, 0), (7.5, 0.5), (5, 0.5)],'temp': [(20, 0.5), (30, 0.4), (40, 0.1)]},
                 14: {'rain': [(0, 0.1), (10, 0.7), (50, 0.2)],'wind': [(9.8, 0), (7.5, 0.5), (5, 0.5)],'temp': [(20, 0.5), (30, 0.4), (40, 0.1)]},
                 15: {'rain': [(0, 0.1), (10, 0.7), (50, 0.2)],'wind': [(9.8, 0), (7.5, 0.5), (5, 0.5)],'temp': [(20, 0.5), (30, 0.4), (40, 0.1)]}
-                } # This is actually weather value distribution
+                } 
 
     material_schedule ={
                 1: [2, 17, 24, 9, 28, 5, 13, 29, 0, 21, 32, 7, 18, 12, 25, 31, 4],
@@ -1669,7 +1575,6 @@ def main():
     module_area =  np.array([3.0, 2.5, 2.5, 3.0, 1.25, 0.75, 0.75, 2.0, 0.75, 2.5, 2.75, 2.0, 2.5, 2.5, 0.75, 2.5, 3.0, 2.75, 2.75, 2.5, 3.0, 0.5, 0.5, 1.25, 0.5, 0.5, 2.0, 0.75, 1.25, 1.25, 1.25, 1.25, 0.5, 2.75]) #The area of modules
 
     adjacency_matrix = np.zeros((34, 34), dtype=np.float32)
-     # Put the values as 1 wherever required. 
     adjacency = {1:[2,3],
                  2:[4,19],
                  3:[4],
@@ -1754,41 +1659,41 @@ def main():
             }
     
     # Triangular distribution of durations
-    duration_distribution =  { # Remember these durations are in hours
-            0: (0.47, 0.625, 0.78),  # For element 0, min=3 days, most likely=5 days, max=7 days
-            1: (0.47, 0.625, 0.78),  # For element 1
-            2: (0.47, 0.625, 0.78),  # For element 2
-            3: (0.47, 0.625, 0.78),  # For element 3
-            4: (0.47, 0.625, 0.78),  # For element 4
-            5: (0.47, 0.625, 0.78),  # For element 5
-            6: (0.47, 0.625, 0.78),  # For element 6
-            7: (0.47, 0.625, 0.78),  # For element 7
-            8: (0.47, 0.625, 0.78),  # For element 8
-            9: (0.47, 0.625, 0.78),  # For element 9
-            10: (0.47, 0.625, 0.78),  # For element 10
-            11: (0.47, 0.625, 0.78),  # For element 11
-            12: (0.47, 0.625, 0.78),  # For element 12
-            13: (0.47, 0.625, 0.78),  # For element 13
-            14: (0.47, 0.625, 0.78),  # For element 14
-            15: (0.47, 0.625, 0.78),  # For element 15
-            16: (0.47, 0.625, 0.78),  # For element 16
-            17: (0.47, 0.625, 0.78),  # For element 17
-            18: (0.47, 0.625, 0.78),  # For element 18
-            19: (0.47, 0.625, 0.78),  # For element 19
-            20: (0.47, 0.625, 0.78),  # For element 20
-            21: (0.47, 0.625, 0.78),  # For element 21
-            22: (0.47, 0.625, 0.78),  # For element 22
-            23: (0.47, 0.625, 0.78),  # For element 23
-            24: (0.47, 0.625, 0.78),  # For element 24
-            25: (0.47, 0.625, 0.78),  # For element 25
-            26: (0.47, 0.625, 0.78),  # For element 26
-            27: (0.47, 0.625, 0.78),  # For element 27
-            28: (0.47, 0.625, 0.78),  # For element 28
-            29: (0.47, 0.625, 0.78),  # For element 29
-            30: (0.47, 0.625, 0.78),  # For element 30
-            31: (0.47, 0.625, 0.78),  # For element 31
-            32: (0.47, 0.625, 0.78),  # For element 32
-            33: (0.47, 0.625, 0.78),  # For element 33
+    duration_distribution =  { 
+            0: (0.47, 0.625, 0.78),  
+            1: (0.47, 0.625, 0.78),  
+            2: (0.47, 0.625, 0.78),  
+            3: (0.47, 0.625, 0.78),  
+            4: (0.47, 0.625, 0.78),  
+            5: (0.47, 0.625, 0.78),  
+            6: (0.47, 0.625, 0.78),  
+            7: (0.47, 0.625, 0.78),  
+            8: (0.47, 0.625, 0.78),  
+            9: (0.47, 0.625, 0.78),  
+            10: (0.47, 0.625, 0.78), 
+            11: (0.47, 0.625, 0.78),  
+            12: (0.47, 0.625, 0.78),  
+            13: (0.47, 0.625, 0.78),  
+            14: (0.47, 0.625, 0.78),  
+            15: (0.47, 0.625, 0.78),  
+            16: (0.47, 0.625, 0.78),  
+            17: (0.47, 0.625, 0.78),  
+            18: (0.47, 0.625, 0.78),  
+            19: (0.47, 0.625, 0.78),  
+            20: (0.47, 0.625, 0.78),  
+            21: (0.47, 0.625, 0.78),  
+            22: (0.47, 0.625, 0.78),  
+            23: (0.47, 0.625, 0.78),  
+            24: (0.47, 0.625, 0.78),  
+            25: (0.47, 0.625, 0.78),  
+            26: (0.47, 0.625, 0.78),  
+            27: (0.47, 0.625, 0.78),  
+            28: (0.47, 0.625, 0.78),  
+            29: (0.47, 0.625, 0.78),  
+            30: (0.47, 0.625, 0.78),  
+            31: (0.47, 0.625, 0.78),  
+            32: (0.47, 0.625, 0.78),  
+            33: (0.47, 0.625, 0.78),  
             }
     
     
@@ -1812,7 +1717,7 @@ def main():
     import math
 
     def update_reward_stats(new_reward, reward_count, running_reward_mean, running_reward_var):
-        """ Update running mean and variance with a new reward using Welford's algorithm. """
+      
         reward_count += 1
         old_mean = running_reward_mean
         running_reward_mean += (new_reward - running_reward_mean) / reward_count
@@ -1820,7 +1725,7 @@ def main():
         return reward_count, running_reward_mean, running_reward_var
     
     def normalize_reward(reward, reward_count, running_reward_mean, running_reward_var):
-        """ Normalize the reward using the running mean and variance. """
+        
         if reward_count > 1:
             reward_std = math.sqrt(running_reward_var / (reward_count - 1))
         else:
@@ -1981,10 +1886,10 @@ def main():
     # After training, save the final model
     torch.save(agent.model.state_dict(), f"PPO_Precast_Scheduling_Model_Final.pth")
     print("Training completed and final model saved.")
-    save_path_durations = f"D:/Ajay/Precast_Assembly_Scheduling/Training_models/Improved2_Singleweather_RewardNorm_CostRewardDeltat/Validation/PPO_TGAT_TGN/Plot_Durations.png"
-    save_path_rewards = f"D:/Ajay/Precast_Assembly_Scheduling/Training_models/Improved2_Singleweather_RewardNorm_CostRewardDeltat/Validation/PPO_TGAT_TGN/Plot_Rewards.png"
-    save_path_violations = f"D:/Ajay/Precast_Assembly_Scheduling/Training_models/Improved2_Singleweather_RewardNorm_CostRewardDeltat/Validation/PPO_TGAT_TGN/Plot_Violations.png"
-    save_path_cost = f"D:/Ajay/Precast_Assembly_Scheduling/Training_models/Improved2_Singleweather_RewardNorm_CostRewardDeltat/Validation/PPO_TGAT_TGN/Plot_Cost.png"
+    save_path_durations = # Add your path
+    save_path_rewards = # Add your path
+    save_path_violations = # Add your path
+    save_path_cost = # Add your path
     plot_rewards_durations(episode_rewards, num_episodes, save_path_durations, scheduled_durations, avg_rewards, avg_durations)
     plot_rewards_rewards(episode_rewards, num_episodes, save_path_rewards, scheduled_durations, avg_rewards, avg_durations)
     plot_rewards_violations(episode_rewards, num_episodes, save_path_violations, episode_constraint_violations, avg_rewards, avg_constraint_violations)
